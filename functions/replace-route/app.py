@@ -2,7 +2,11 @@ import os
 import json
 import logging
 import time
+import shlex
 import urllib
+import urllib.error
+import urllib.parse
+import urllib.request
 import socket
 
 import botocore
@@ -222,6 +226,26 @@ def are_any_routes_pointing_to_nat_gateway(route_table_ids):
         logger.error(f"Error checking NAT Gateway routes: {e}")
         return False
 
+def build_connectivity_check_commands(check_urls):
+    """
+    Builds the shell commands run on the NAT instance (as root, via SSM
+    AWS-RunShellScript) to test connectivity. URLs are restricted to http(s)
+    and shell-quoted so a CHECK_URLS value cannot inject additional commands.
+    """
+    commands = []
+    for url in check_urls:
+        url = url.strip()
+        if not url:
+            continue
+        if urllib.parse.urlsplit(url).scheme not in ("http", "https"):
+            logger.warning("Ignoring check URL with unsupported scheme: %r", url)
+            continue
+        commands.append(
+            f"curl -s -o /dev/null -w '%{{http_code}}\\n' --max-time 5 {shlex.quote(url)}"
+        )
+    return commands
+
+
 def attempt_nat_instance_restore():
     ssm_client = boto3.client('ssm')
     nat_instance_id = get_current_nat_instance_id(os.getenv("NAT_ASG_NAME"))
@@ -235,10 +259,10 @@ def attempt_nat_instance_restore():
 
     try:
         check_urls = os.getenv("CHECK_URLS", ",".join(DEFAULT_CHECK_URLS)).split(",")
-        commands = []
-        for url in check_urls:
-            command = f"curl -s -o /dev/null -w '%{{http_code}}\\n' --max-time 5 {url.strip()}"
-            commands.append(command)
+        commands = build_connectivity_check_commands(check_urls)
+        if not commands:
+            logger.warning("No valid CHECK_URLS to test from the NAT instance. Skipping NAT restore.")
+            return
         # Send SSM command to test connectivity
         response = ssm_client.send_command(
             InstanceIds=[nat_instance_id],
