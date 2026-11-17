@@ -473,3 +473,51 @@ def test_nat_restore_option(mock_sleep, monkeypatch):
             with mock.patch('app.attempt_nat_instance_restore') as mock_restore:
                 connectivity_test_handler(event=json.loads(cloudwatch_event), context=Context())
                 mock_restore.assert_called_once()  # Should try to restore
+
+
+def test_build_connectivity_check_commands():
+    from app import build_connectivity_check_commands
+
+    commands = build_connectivity_check_commands([
+        "https://www.example.com",
+        " https://www.google.com ",
+        "",
+    ])
+    assert commands == [
+        "curl -s -o /dev/null -w '%{http_code}\\n' --max-time 5 https://www.example.com",
+        "curl -s -o /dev/null -w '%{http_code}\\n' --max-time 5 https://www.google.com",
+    ]
+
+
+def test_build_connectivity_check_commands_rejects_shell_injection():
+    from app import build_connectivity_check_commands
+
+    commands = build_connectivity_check_commands([
+        "https://example.com/;touch /tmp/pwned",
+        "https://example.com/$(id)",
+        "file:///etc/shadow",
+        "-o/tmp/x https://example.com",
+    ])
+    # Non-http(s) schemes and option-looking values are dropped entirely.
+    assert len(commands) == 2
+    # Remaining URLs are passed to curl as a single quoted argument.
+    assert commands[0].endswith(" 'https://example.com/;touch /tmp/pwned'")
+    assert commands[1].endswith(" 'https://example.com/$(id)'")
+
+
+@mock.patch('time.sleep')
+def test_attempt_nat_instance_restore_skips_without_valid_urls(mock_sleep, monkeypatch):
+    from app import attempt_nat_instance_restore
+
+    monkeypatch.setenv("ROUTE_TABLE_IDS_CSV", "rtb-12345")
+    monkeypatch.setenv("NAT_ASG_NAME", "test-nat-asg")
+    monkeypatch.setenv("CHECK_URLS", "file:///etc/passwd,")
+
+    mock_ssm = mock.MagicMock()
+    with mock.patch('app.get_current_nat_instance_id', return_value='i-test123'), \
+         mock.patch('app.boto3.client', return_value=mock_ssm), \
+         mock.patch('app.replace_route') as mock_replace_route:
+        attempt_nat_instance_restore()
+
+    mock_ssm.send_command.assert_not_called()
+    mock_replace_route.assert_not_called()

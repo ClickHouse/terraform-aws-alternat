@@ -452,13 +452,48 @@ data "aws_iam_policy_document" "alternat_ec2_policy" {
   }
 
   statement {
-    sid    = "alterNATEIPPermissions"
+    sid    = "alterNATDescribeEIPPermissions"
     effect = "Allow"
     actions = [
       "ec2:DescribeAddresses",
-      "ec2:AssociateAddress"
     ]
     resources = ["*"]
+  }
+
+  # ec2:AssociateAddress is authorized against the elastic-ip, instance and
+  # network-interface resources. Limit the Elastic IPs to the module's own pool
+  # so a compromised NAT instance cannot claim (and reassociate) any other EIP
+  # in the account. The --no-allow-reassociation flag used by alternat.sh is
+  # client-side only and is not an IAM boundary.
+  statement {
+    sid    = "alterNATAssociateEIPPermissions"
+    effect = "Allow"
+    actions = [
+      "ec2:AssociateAddress"
+    ]
+    resources = concat(
+      [
+        for allocation_id in local.nat_instance_eip_ids
+        : "arn:aws:ec2:${data.aws_region.current.id}:${data.aws_caller_identity.current.account_id}:elastic-ip/${allocation_id}"
+      ],
+      ["arn:aws:ec2:${data.aws_region.current.id}:${data.aws_caller_identity.current.account_id}:network-interface/*"],
+    )
+  }
+
+  statement {
+    sid    = "alterNATAssociateEIPToNATInstance"
+    effect = "Allow"
+    actions = [
+      "ec2:AssociateAddress"
+    ]
+    resources = ["arn:aws:ec2:${data.aws_region.current.id}:${data.aws_caller_identity.current.account_id}:instance/*"]
+    condition {
+      test     = "StringEquals"
+      variable = "aws:ResourceTag/alterNATInstance"
+      values = [
+        "true"
+      ]
+    }
   }
 
   statement {
