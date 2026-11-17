@@ -20,7 +20,7 @@ variable "alternat_image_uri" {
 }
 
 variable "architecture" {
-  description = "Architecture of the NAT instance image. Must be compatible with nat_instance_type."
+  description = "Architecture of the NAT instance image. Must be compatible with nat_instance_type, or with every type in nat_instance_types."
   type        = string
   default     = "arm64"
 }
@@ -158,9 +158,24 @@ variable "nat_lambda_function_role_name" {
 }
 
 variable "nat_instance_type" {
-  description = "Instance type to use for NAT instances."
+  description = "Instance type to use for NAT instances. Ignored if `nat_instance_types` is set."
   type        = string
   default     = "c6gn.8xlarge"
+}
+
+variable "nat_instance_types" {
+  description = <<-EOT
+  Ordered list of instance types to use for NAT instances. When set, each NAT Auto Scaling Group uses a mixed instances policy
+  and launches the first instance type in the list that has capacity in its AZ. All types must be compatible with `architecture`.
+  If empty, only `nat_instance_type` is used.
+  EOT
+  type        = list(string)
+  default     = []
+
+  validation {
+    condition     = length(var.nat_instance_types) == length(distinct(var.nat_instance_types))
+    error_message = "nat_instance_types must not contain duplicates."
+  }
 }
 
 variable "nat_instance_eip_ids" {

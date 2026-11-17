@@ -12,6 +12,9 @@ locals {
   ]
   launch_script_lifecycle_hook_name = "NATInstanceLaunchScript"
 
+  use_mixed_instances_policy = length(var.nat_instance_types) > 0
+  nat_instance_type          = local.use_mixed_instances_policy ? var.nat_instance_types[0] : var.nat_instance_type
+
   nat_instance_image_id = var.nat_ami == "" ? "resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-minimal-kernel-default-${var.architecture}" : var.nat_ami
 
   nat_instance_ingress_sgs = concat(var.ingress_security_group_ids, [aws_security_group.nat_lambda.id])
@@ -94,9 +97,40 @@ resource "aws_autoscaling_group" "nat_instance" {
   max_instance_lifetime = var.max_instance_lifetime
   vpc_zone_identifier   = [each.value]
 
-  launch_template {
-    id      = aws_launch_template.nat_instance_template[each.key].id
-    version = "$Latest"
+  dynamic "launch_template" {
+    for_each = local.use_mixed_instances_policy ? [] : [1]
+
+    content {
+      id      = aws_launch_template.nat_instance_template[each.key].id
+      version = "$Latest"
+    }
+  }
+
+  dynamic "mixed_instances_policy" {
+    for_each = local.use_mixed_instances_policy ? [1] : []
+
+    content {
+      instances_distribution {
+        on_demand_allocation_strategy            = "prioritized"
+        on_demand_base_capacity                  = 1
+        on_demand_percentage_above_base_capacity = 100
+      }
+
+      launch_template {
+        launch_template_specification {
+          launch_template_id = aws_launch_template.nat_instance_template[each.key].id
+          version            = "$Latest"
+        }
+
+        dynamic "override" {
+          for_each = var.nat_instance_types
+
+          content {
+            instance_type = override.value
+          }
+        }
+      }
+    }
   }
 
   dynamic "initial_lifecycle_hook" {
@@ -278,7 +312,7 @@ resource "aws_launch_template" "nat_instance_template" {
     name = aws_iam_instance_profile.nat_instance.name
   }
 
-  instance_type = var.nat_instance_type
+  instance_type = local.nat_instance_type
 
   key_name = var.nat_instance_key_name
 
