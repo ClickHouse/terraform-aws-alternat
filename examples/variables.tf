@@ -4,6 +4,12 @@ variable "alternat_instance_type" {
   default     = "t4g.medium"
 }
 
+variable "alternat_instance_types" {
+  description = "Ordered list of instance types to use for the Alternat instances. Overrides alternat_instance_type when set."
+  type        = list(string)
+  default     = []
+}
+
 variable "aws_region" {
   description = "The AWS region to deploy to."
   type        = string

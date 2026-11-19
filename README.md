@@ -261,6 +261,17 @@ If you provide explicit EIPs for all zones, no new aws_eip.nat_gateway_eips reso
 
   > Typically, instances with 16 vCPUs or fewer (size 4xlarge and smaller) are documented as having "up to" a specified bandwidth; for example, "up to 10 Gbps". These instances have a baseline bandwidth. To meet additional demand, they can use a network I/O credit mechanism to burst beyond their baseline bandwidth. Instances can use burst bandwidth for a limited time, typically from 5 to 60 minutes, depending on the instance size.
 
+- If some AZs have limited capacity for your preferred instance type, set `nat_instance_types` to an ordered list of instance types. Each NAT instance Auto Scaling Group then uses a [mixed instances policy](https://docs.aws.amazon.com/autoscaling/ec2/userguide/ec2-auto-scaling-mixed-instances-groups.html) with the `prioritized` allocation strategy, launching the first type in the list that has capacity in its AZ. When set, `nat_instance_type` is ignored.
+
+  ```tf
+    nat_instance_types = ["c6gn.8xlarge", "c7gn.8xlarge", "c6gn.16xlarge"]
+  ```
+
+  Keep in mind that:
+  - All instance types must share the same CPU architecture, matching `architecture` and the AMI.
+  - Choose fallback types with similar network bandwidth, otherwise an AZ may silently run on a less capable NAT instance.
+  - An instance launched with a fallback type is kept until it is replaced, e.g. when `max_instance_lifetime` is reached. Start an instance refresh on the Auto Scaling Group to move back to the preferred type sooner.
+
 - [SSM Session Manager](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager.html) is enabled by default. To view NAT connections on an instance, use sessions manager to connect, then run `sudo cat /proc/net/nf_conntrack`. Disable SSM by setting `enable_ssm=false`.
 
 - A new instance will be launched automatically when the maximum instance lifetime is reached using the latest AMI.
